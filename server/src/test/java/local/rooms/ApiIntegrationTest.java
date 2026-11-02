@@ -1,0 +1,34 @@
+package local.rooms;
+
+import org.junit.jupiter.api.*;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.http.*;
+import org.springframework.jdbc.core.JdbcTemplate;
+import java.util.*;
+import static org.junit.jupiter.api.Assertions.*;
+
+@SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT,properties={"spring.datasource.url=jdbc:h2:mem:rooms-test;DB_CLOSE_DELAY=-1", "room.admin-password=TestPass123!", "room.enrollment-key=EnrollmentTest123"})
+class ApiIntegrationTest {
+ @Autowired TestRestTemplate http; @Autowired JdbcTemplate jdbc;
+ String admin,device,token;
+ static Map<String,Object> map(Object... kv){Map<String,Object> m=new LinkedHashMap<>();for(int i=0;i+1<kv.length;i+=2)m.put(String.valueOf(kv[i]),kv[i+1]);return m;}
+ static List<Object> list(Object... items){return new ArrayList<Object>(Arrays.asList(items));}
+ Map<String,Object> snapshot(String current){return map("number","0306","name","第三会议室","states",list(map("id","free","name","空闲","color","#83dfc2","icon","✓"),map("id","busy","name","使用中","color","#ffc18e","icon","◷")),"current",current);}
+ ResponseEntity<Map> post(String url,Object data,HttpHeaders h){return http.exchange(url,HttpMethod.POST,new HttpEntity<>(data,h),Map.class);}
+ HttpHeaders ah(){HttpHeaders h=new HttpHeaders();h.setBearerAuth(admin);return h;}
+ HttpHeaders dh(){HttpHeaders h=new HttpHeaders();h.set("X-Device-Id",device);h.set("X-Device-Token",token);return h;}
+ Map sync(long revision,String current,Object ack){Map<String,Object> b=new HashMap<String,Object>();b.put("revision",revision);b.put("snapshot",snapshot(current));if(ack!=null)b.put("ack",ack);ResponseEntity<Map> r=post("/api/device/sync",b,dh());assertEquals(200,r.getStatusCode().value(),r.toString());return r.getBody();}
+ Map command(long revision,String current){ResponseEntity<Map> r=post("/api/admin/devices/"+device+"/commands",map("baseRevision",revision,"snapshot",snapshot(current)),ah());assertEquals(200,r.getStatusCode().value(),r.toString());return r.getBody();}
+ @BeforeEach void setup(){admin=(String)post("/api/auth/login",map("username","admin","password","TestPass123!"),new HttpHeaders()).getBody().get("token");device=UUID.randomUUID().toString();ResponseEntity<Map> r=post("/api/device/register",map("deviceId",device,"enrollmentKey","EnrollmentTest123"),new HttpHeaders());assertEquals(200,r.getStatusCode().value());token=(String)r.getBody().get("token");}
+ @Test void authenticationAndDuplicateRegistration(){assertEquals(401,http.getForEntity("/api/admin/devices",String.class).getStatusCode().value());assertEquals(401,post("/api/device/sync",map("revision",0,"snapshot",snapshot("free")),new HttpHeaders()).getStatusCode().value());assertEquals(409,post("/api/device/register",map("deviceId",device,"enrollmentKey","EnrollmentTest123"),new HttpHeaders()).getStatusCode().value());assertEquals(401,post("/api/device/register",map("deviceId","another","enrollmentKey","bad"),new HttpHeaders()).getStatusCode().value());}
+ @Test void commandAcknowledgementIsIdempotent(){sync(0,"free",null);Map c=command(0,"busy");String id=(String)c.get("id");assertNotNull(sync(0,"free",null).get("command"));Map<String,Object> ack=map("id",id,"result","APPLIED","message","");sync(1,"busy",ack);sync(1,"busy",ack);assertEquals("APPLIED",jdbc.queryForObject("select status from commands where id=?",String.class,id));assertEquals(1L,jdbc.queryForObject("select revision from devices where id=?",Long.class,device).longValue());}
+ @Test void localRevisionInvalidatesQueuedCommand(){sync(0,"free",null);String id=(String)command(0,"busy").get("id");assertNull(sync(1,"free",null).get("command"));assertEquals("CONFLICT",jdbc.queryForObject("select status from commands where id=?",String.class,id));}
+ @Test void staleAdminSnapshotIsRejected(){sync(2,"free",null);assertEquals(409,post("/api/admin/devices/"+device+"/commands",map("baseRevision",1,"snapshot",snapshot("busy")),ah()).getStatusCode().value());}
+ @Test void offlineAndExpiredCommands(){sync(0,"free",null);jdbc.update("update devices set last_seen=0 where id=?",device);assertEquals(409,post("/api/admin/devices/"+device+"/commands",map("baseRevision",0,"snapshot",snapshot("busy")),ah()).getStatusCode().value());sync(0,"free",null);String id=(String)command(0,"busy").get("id");jdbc.update("update commands set expires_at=0 where id=?",id);assertNull(sync(0,"free",null).get("command"));assertEquals("EXPIRED",jdbc.queryForObject("select status from commands where id=?",String.class,id));}
+ @Test void sameRevisionCannotReplaceSnapshot(){sync(0,"free",null);assertEquals(409,post("/api/device/sync",map("revision",0,"snapshot",snapshot("busy")),dh()).getStatusCode().value());assertEquals(409,post("/api/device/sync",map("revision",-1,"snapshot",snapshot("free")),dh()).getStatusCode().value());}
+ @Test void invalidCurrentAndMultiplePendingRejected(){Map<String,Object> bad=new HashMap<String,Object>(snapshot("absent"));assertEquals(400,post("/api/device/sync",map("revision",0,"snapshot",bad),dh()).getStatusCode().value());sync(0,"free",null);command(0,"busy");assertEquals(409,post("/api/admin/devices/"+device+"/commands",map("baseRevision",0,"snapshot",snapshot("busy")),ah()).getStatusCode().value());}
+ @Test void templatePersistence(){Map<String,Object> b=map("name","测试模板","states",snapshot("free").get("states"));ResponseEntity<Map> r=post("/api/admin/templates",b,ah());assertEquals(200,r.getStatusCode().value());String id=(String)r.getBody().get("id");assertEquals("测试模板",jdbc.queryForObject("select name from templates where id=?",String.class,id));}
+ @Test void enrollmentKeyViewableAndRotatable(){try{ResponseEntity<Map> g=http.exchange("/api/admin/settings/enrollment-key",HttpMethod.GET,new HttpEntity<Map>(ah()),Map.class);assertEquals(200,g.getStatusCode().value());assertEquals("EnrollmentTest123",g.getBody().get("enrollmentKey"));assertEquals(400,post("/api/admin/settings/enrollment-key",map("enrollmentKey","short"),ah()).getStatusCode().value());assertEquals(200,post("/api/admin/settings/enrollment-key",map("enrollmentKey","RotatedKey123456"),ah()).getStatusCode().value());assertEquals("RotatedKey123456",jdbc.queryForObject("select setting_value from settings where name='enrollment_key'",String.class));assertEquals(401,post("/api/device/register",map("deviceId",UUID.randomUUID().toString(),"enrollmentKey","EnrollmentTest123"),new HttpHeaders()).getStatusCode().value());assertEquals(200,post("/api/device/register",map("deviceId",UUID.randomUUID().toString(),"enrollmentKey","RotatedKey123456"),new HttpHeaders()).getStatusCode().value());}finally{jdbc.update("update settings set setting_value=? where name='enrollment_key'","EnrollmentTest123");}}
+}

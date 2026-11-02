@@ -1,0 +1,17 @@
+[Unit]
+Description=Room status server
+After=network.target
+
+[Service]
+Type=simple
+User=roomdisplay
+WorkingDirectory=/opt/room-display
+EnvironmentFile=/opt/room-display/room.env
+ExecStart=/usr/bin/java -jar /opt/room-display/room-server.jar
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

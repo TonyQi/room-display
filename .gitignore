@@ -1,0 +1,13 @@
+node_modules/
+dist/
+server/target/
+server/web/node/
+android/.gradle/
+android/local.properties
+android/**/build/
+.gradle/
+data/
+room.env
+*.jks
+*.keystore
+*.log
