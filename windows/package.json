@@ -1,0 +1,1 @@
+{"name":"room-display-desktop","version":"1.0.0","description":"房间状态 Windows 一体化管理中心","private":true,"main":"app/main.cjs","scripts":{"start":"electron .","test":"node --test tests/*.test.cjs","package":"node scripts/package.mjs"},"devDependencies":{"electron":"45.2.1"}}

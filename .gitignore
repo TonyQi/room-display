@@ -11,3 +11,7 @@ room.env
 *.jks
 *.keystore
 *.log
+windows/build/
+windows/runtime-resources/
+windows/dev-data/
+windows/node-probe.txt

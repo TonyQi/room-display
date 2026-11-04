@@ -14,7 +14,7 @@ import static local.rooms.Models.*;
 public class ApiController {
  private final AuthService auth;private final RoomService rooms;
  public ApiController(AuthService auth,RoomService rooms){this.auth=auth;this.rooms=rooms;}
- @GetMapping("/health") Map<String,String> health(){return json("status","UP");}
+ @GetMapping("/health") Map<String,String> health(){Map<String,String> result=json("status","UP");String instance=System.getenv("ROOM_INSTANCE_TOKEN");if(instance!=null)result.put("instance",instance);return result;}
  @PostMapping("/auth/login") Map<String,String> login(@RequestBody Login login,HttpServletRequest request){return json("token",auth.login(login,request.getRemoteAddr()));}
  @GetMapping("/auth/me") Map<String,String> me(){return json("username","admin");}
  @PostMapping("/auth/password") Map<String,String> password(@RequestBody PasswordChange request){auth.changePassword(request);return json("message","密码已修改，请重新登录");}
