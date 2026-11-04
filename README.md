@@ -5,6 +5,7 @@
 - **Android 设备端**（Kotlin 原生）：横竖屏状态展示、本地编辑、状态免密切换、管理密码、持续亮屏、可选专用设备锁定（防退出）
 - **局域网服务端**（Java 17 构建 / Java 8 可运行 · Spring Boot · H2）：设备注册与同步、指令下发与确认、状态模板、操作日志；**单个 JAR 内嵌管理端网页**
 - **浏览器管理端**（Vue 3 · Vite）：真实设备列表、房间与状态模板管理、批量下发、操作日志、密码与设备接入管理
+- **Windows 免安装管理中心**（Electron）：一体化交付——内置管理界面、Java 通信服务与运行环境，解压后双击 `RoomDisplay.exe` 即用，无需安装 Java/Node 或单独部署服务器
 
 ![设备端界面](docs/android-横屏.png)
 
@@ -25,6 +26,11 @@
 - 登录后查看真实注册设备（在线/离线、版本、待确认指令），无演示假数据
 - 房间/状态编辑与切换均带版本号，设备确认保存后才显示"已生效"
 - 模板保存与下发分离；离线或有待确认指令的设备不可选；日志逐台记录结果
+
+**Windows 免安装包**
+- 解压即用：内置通信服务与 JRE，免部署服务器；关闭窗口收至托盘，设备连接不中断，托盘退出才停止服务
+- 首次运行设置管理密码（账户 `admin`），接入向导直接显示本机局域网地址；系统设置查看/更换注册密钥、打开数据目录
+- 一键备份（备份时短暂暂停设备同步并自动恢复，完成后重新登录）；数据保存在 EXE 旁 `data/`，升级替换程序文件时保留
 
 ## 系统架构
 
@@ -58,6 +64,7 @@ room-display/
 │   ├── src/          # Java 服务源码、H2 schema、集成测试
 │   └── web/          # Vue3 管理端源码（构建产物并入 JAR 的 static）
 ├── deploy/           # Windows/Linux 启动脚本、room.env 示例、systemd 示例
+├── windows/          # Windows 免安装桌面包（Electron 壳与打包脚本；打包产物不入库）
 ├── docs/             # 设计说明与模拟器验证截图
 ├── tests/            # 跨端协议联调测试（独立测试服务器用）
 └── API-CONTRACT.md   # 三端接口契约
@@ -68,6 +75,7 @@ room-display/
 ### 构建要求
 - **服务端**：JDK 17 + Maven 3.9（构建用；产物为 Java 8 字节码，Java 8 及以上可运行）。管理端无需预装 Node——Maven 构建会自动下载 Node 并构建网页（首次需联网）
 - **Android**：Android SDK Platform 35 / Build Tools 35.0.0
+- **Windows 免安装包**：Node 22.12+（仅打包用），详见 `windows/README.md`
 
 ```sh
 cd server
@@ -108,6 +116,33 @@ $env:ROOM_ENROLLMENT_KEY='请替换为足够长的随机设备注册密钥'
 ```
 
 浏览器访问 `http://服务器IP:8080`，初始用户名 `admin`。首次建库后请在后台修改管理员密码；注册密钥可在后台「系统设置 · 设备接入」查看与更换。H2 数据库位于启动工作目录的 `data/` 下——**不要**多进程共用同一 data 目录；备份前先正常停止服务再复制整个 data 目录。防火墙按需放行 8080，脚本不自动改防火墙。`room-display.service` 仅为可选 systemd 示例，使用前请创建专用非 root 用户并按实际路径修改。
+
+### Windows 免安装桌面包（一体化交付）
+
+面向管理电脑的免安装文件夹：解压后双击 `RoomDisplay.exe`，内置管理界面、Java 通信服务与运行环境，不需要另行部署服务器或安装 Java/Node。
+
+- 首次运行设置管理密码（账户 `admin`，默认端口 8080）；登录后「接入设备」直接显示本机局域网地址，安卓端在"服务器地址"填它即可
+- 关闭窗口收至托盘，设备连接不中断；从托盘"退出管理中心"才停止服务
+- 数据保存在 EXE 旁的 `data/`：完整解压到可写目录、勿只移动 EXE；升级时退出程序、保留 `data`、替换其余文件；一个 data 目录只跑一个实例
+- 系统设置支持一键备份（备份时短暂停止设备同步并自动恢复，完成后重新登录）；恢复需先退出程序再拷回 `data`
+- Windows 防火墙首次提示时仅允许受信任专用网络；程序不改防火墙、不申请管理员权限
+
+打包构建（Windows x64，Node 22.12+、JDK 17、Maven）：
+
+```powershell
+cd server/web
+npm ci; npm run build
+cd ../
+mvn -Dskip.web=true package        # 产出内置的 room-server.jar
+cd ../windows
+npm ci
+node node_modules/electron/install.js
+.\scripts\prepare-runtime.ps1      # 准备 JRE 与服务 JAR 到 runtime-resources/
+npm test
+npm run package                    # 输出 build/RoomDisplay-win32-x64
+```
+
+产物不含用户数据库或预设密码；打包的 Electron/JRE 许可证随分发目录保留。未使用商业代码签名证书，Windows 可能提示未知发布者，属预期现象（详见 `windows/README.md`）。
 
 ### Android 设备接入
 
